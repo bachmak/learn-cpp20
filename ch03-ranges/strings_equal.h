@@ -1,11 +1,10 @@
+#pragma once
+
 #include <algorithm>
 #include <ranges>
 #include <string>
 
-enum class Version {
-  Iterator,
-  Ranges,
-};
+#include "version.h"
 
 template <Version v>
 constexpr bool strings_equal(const std::string &lhs, const std::string &rhs);
