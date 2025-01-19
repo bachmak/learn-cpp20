@@ -1,3 +1,4 @@
+#include "custom_adapter.h"
 #include "odd_numbers.h"
 #include "range.h"
 #include "range_algorithm_overview.h"
