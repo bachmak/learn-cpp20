@@ -6,6 +6,13 @@
 #include <unordered_set>
 #include <vector>
 
+template <typename Func, typename Range>
+concept BoolPredicate =
+    std::ranges::range<Range> &&                               //
+    std::invocable<Func, std::ranges::range_value_t<Range>> && //
+    std::same_as<std::invoke_result_t<Func, std::ranges::range_value_t<Range>>,
+                 bool>;
+
 /*
  * std::views::all
  *
@@ -214,13 +221,6 @@ static_assert(test(Input(std::views::iota(1, 4), 100), std::vector<int>()));
  * false
  */
 namespace drop_while {
-template <typename Func, typename Range>
-concept BoolPredicate =
-    std::ranges::range<Range> &&                               //
-    std::invocable<Func, std::ranges::range_value_t<Range>> && //
-    std::same_as<std::invoke_result_t<Func, std::ranges::range_value_t<Range>>,
-                 bool>;
-
 template <std::ranges::range Range, BoolPredicate<Range> Pred> struct Input {
   constexpr Input(Range range, Pred pred)
       : range(std::move(range)), pred(std::move(pred)) {}
@@ -254,3 +254,199 @@ constexpr auto is_negative = [](int n) { return n < 0; };
 static_assert(test(Input(vec{-9, -7, -1, 0, 1, 8, 12}, is_negative),
                    vec{0, 1, 8, 12}));
 } // namespace drop_while
+
+/*
+ * std::views::elements
+ *
+ * std::views::elements creates a view that returns N-th element of a tuple-like
+ * element in a sequence. The N value is a compile-time constant, like that
+ * passed to std::get<N>.
+ *
+ * Tuple-like types are std::tuple, std::pair, std::array
+ * (where N defines an index), or user-defined types that satisfy std::tuple
+ * interface: specializations of get, tuple_size, and tuple_element should be
+ * provided. The latter case doesn't seem really useful so far, except for some
+ * generic template code.
+ *
+ * std::views::elements is a generalization of std::views::keys and
+ * std::views::values
+ */
+namespace elements {
+template <std::ranges::range Range, std::size_t index> struct InputImpl {
+  constexpr explicit InputImpl(Range range) : range(std::move(range)) {}
+
+  Range range;
+};
+
+// could be nice to achieve the same effect with a deduction guide, but I
+// couldn't get it compiling :)
+template <std::size_t index, std::ranges::range Range>
+constexpr auto Input(Range range) {
+  return InputImpl<Range, index>(std::move(range));
+}
+
+template <std::ranges::range Range, std::size_t index>
+constexpr auto test(const InputImpl<Range, index> &input,
+                    const std::ranges::range auto &expected) {
+  auto actual = input.range | std::views::elements<index>;
+  return std::ranges::equal(actual, expected);
+}
+
+namespace Test1 {
+using elem_t = std::tuple<int, int>;
+constexpr auto array = std::to_array<elem_t>({{1, 0}, {2, 0}, {3, 0}});
+static_assert(test(Input<0>(array), std::to_array({1, 2, 3})));
+static_assert(test(Input<1>(array), std::to_array({0, 0, 0})));
+} // namespace Test1
+
+namespace Test2 {
+using elem_t = std::pair<std::string_view, int>;
+constexpr auto array = std::to_array<elem_t>({{"hi", 1}, {"b2", 4}, {"no", 2}});
+static_assert(test(Input<0>(array), std::to_array({"hi", "b2", "no"})));
+static_assert(test(Input<1>(array), std::to_array({1, 4, 2})));
+// static_assert(test(Input<2>(array), std::to_array({1, 4, 2}))); -> error
+} // namespace Test2
+
+namespace Test3 {
+using elem_t = std::array<int, 3>;
+constexpr auto array = std::to_array<elem_t>({{1, 2, 3}, {4, 5, 6}});
+static_assert(test(Input<0>(array), std::to_array({1, 4})));
+static_assert(test(Input<1>(array), std::to_array({2, 5})));
+static_assert(test(Input<2>(array), std::to_array({3, 6})));
+// static_assert(test(Input<3>(array), std::to_array({3, 6}))); -> error
+} // namespace Test3
+
+// other examples could be associative containers and custom tuple-like types
+} // namespace elements
+
+/*
+ * std::views::filter
+ *
+ * creates a view with elements satisfying a given predicate. It's pretty much
+ * straightforward and does exactly what the name suggests.
+ */
+namespace filter {
+
+template <std::ranges::range Range, BoolPredicate<Range> Pred> struct Input {
+  constexpr Input(Range range, Pred pred)
+      : range(std::move(range)), pred(std::move(pred)) {}
+
+  Range range;
+  Pred pred;
+};
+
+constexpr auto test(const auto &input,
+                    const std::ranges::range auto &expected) {
+  auto actual = input.range | std::views::filter(input.pred);
+  return std::ranges::equal(actual, expected);
+}
+
+namespace Test1 {
+constexpr auto array = std::to_array({-3, -2, -1, 0, 1, 2, 3});
+constexpr auto is_negative = [](auto c) { return c < 0; };
+constexpr auto is_zero = [](auto c) { return c == 0; };
+constexpr auto is_positive = [](auto c) { return c > 0; };
+
+static_assert(test(Input(array, is_negative), std::to_array({-3, -2, -1})));
+static_assert(test(Input(array, is_zero), std::to_array({0})));
+static_assert(test(Input(array, is_positive), std::to_array({1, 2, 3})));
+} // namespace Test1
+
+namespace Test2 {
+using elem_t = std::optional<std::string_view>;
+constexpr auto array = std::to_array<elem_t>(
+    {"John", "Felix", std::nullopt, "Carl", std::nullopt});
+
+static_assert(test(Input(array, &elem_t::has_value),
+                   std::to_array({"John", "Felix", "Carl"})));
+} // namespace Test2
+} // namespace filter
+
+/*
+ * std::vies::join
+ *
+ * std::views::join 'flattens' a range of ranges into a flat sequence. That's
+ * it.
+ */
+namespace join {
+constexpr auto test(const std::ranges::range auto &input,
+                    const std::ranges::range auto &expected) -> bool {
+  auto actual = input | std::views::join;
+  return std::ranges::equal(actual, expected);
+}
+
+namespace Test1 {
+static_assert(test(std::to_array<std::string_view>({"Hel", "lo", ", world!"}),
+                   std::string("Hello, world!")));
+
+using elem_t = std::array<int, 2>;
+static_assert(test(std::to_array<elem_t>({{1, 2}, {3, 4}, {5, 6}}),
+                   std::to_array({1, 2, 3, 4, 5, 6})));
+
+// could work with C++26, once std::optional gains begin and end
+// static_assert(test(std::optional<std::optional<int>>(2),
+// std::optional<int>(2)));
+} // namespace Test1
+} // namespace join
+
+/*
+ * std::views::ref
+ *
+ * This section is intentionally empty as std::ranges::ref_view is more of a
+ * low-level range adapter, used to provide a non-owning view to a range. For
+ * standard ranges, std::views::all does just the right thing, choosing the
+ * right adapter. Unless dealing with custom range types (which might be the
+ * case though!), std::views::ref doesn't seem worth using explicitly.
+ */
+namespace ref {}
+
+/*
+ * std::views::reverse
+ *
+ * Creates a view in which the elements go in the reverse order. Quite simple.
+ */
+namespace reverse {
+
+constexpr auto test(const std::ranges::range auto &input,
+                    const std::ranges::range auto &expected) -> bool {
+  auto actual = input | std::views::reverse;
+  return std::ranges::equal(actual, expected);
+}
+
+static_assert(test(std::string("hello"), std::string("olleh")));
+static_assert(test(std::vector{1, 2, 3, 4, 5}, std::vector{5, 4, 3, 2, 1}));
+
+using elem_t = std::array<int, 2>;
+static_assert(test(std::to_array<elem_t>({{1, 2}, {3, 4}, {5, 6}}),
+                   std::to_array<elem_t>({{5, 6}, {3, 4}, {1, 2}})));
+} // namespace reverse
+
+/*
+ * std::views::split
+ *
+ * Splits the given range into a sequence of sub-ranges based on separator.
+ * Notes: the separator can be either of the element type (char in an
+ * std::string) or of the subrange type (std::string_view in an
+ * std::string_view)
+ */
+namespace split {
+
+template <std::ranges::range Range, typename Separator> struct Input {
+  constexpr Input(Range range, Separator separator)
+      : range(std::move(range)), separator(std::move(separator)) {}
+
+  Range range;
+  Separator separator;
+};
+
+constexpr auto test(const auto &input, const std::ranges::range auto &expected)
+    -> bool {
+  // the std::ranges::to part works only for owning ranges
+  auto actual = input.range | std::views::split(input.separator) |
+                std::views::join | std::ranges::to<decltype(input.range)>();
+  return std::ranges::equal(actual, expected);
+}
+
+static_assert(test(Input(std::string("h e l l o"), ' '), std::string("hello")));
+
+} // namespace split
