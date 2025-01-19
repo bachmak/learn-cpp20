@@ -7,12 +7,12 @@
 #include <vector>
 
 /*
- * Our custom range adapter. We just wrap an existing adapter (or a chain of
- * multiple such adapters) and pass some additional data to it.
+ * Our custom range adaptor. We just wrap an existing adaptor (or a chain of
+ * multiple such adaptors) and pass some additional data to it.
  *
  * Benefits: less code duplication, clear naming
  *
- * Note: capture by value, as the lambda is invoked later, as the adapter
+ * Note: capture by value, as the lambda is invoked later, as the adaptor
  * actually gets called.
  */
 constexpr auto add_currency(const std::string &suffix) {
